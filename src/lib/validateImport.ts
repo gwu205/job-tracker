@@ -1,4 +1,4 @@
-import { SOURCES, STATUSES } from '../types'
+import { INTERVIEW_TYPES, SOURCES, STATUSES } from '../types'
 
 export interface ImportValidationResult {
   valid: boolean
@@ -81,7 +81,34 @@ export function validateImportedState(parsed: unknown): ImportValidationResult {
       })
     }
 
-    if (!Array.isArray(app?.interviewRounds)) flag('interviewRounds', 'missing an "interviewRounds" array (use [] if none)', label)
+    if (!Array.isArray(app?.interviewRounds)) {
+      flag('interviewRounds', 'missing an "interviewRounds" array (use [] if none)', label)
+    } else {
+      app.interviewRounds.forEach((r: any) => {
+        if (typeof r?.id !== 'string' || !r.id) flag('interviewRounds.id', 'an interviewRounds entry is missing "id"', label)
+        if (typeof r?.date !== 'string' || !r.date) {
+          flag('interviewRounds.date', 'an interviewRounds entry is missing "date" or it\'s null', label)
+        }
+        if (!INTERVIEW_TYPES.includes(r?.type)) {
+          flag('interviewRounds.type', `an interviewRounds entry has a "type" not in ${INTERVIEW_TYPES.join(', ')}`, `${label}: "${r?.type}"`)
+        }
+        if (r?.interviewer !== undefined && r?.interviewerName === undefined) {
+          flag('interviewRounds.interviewer', 'an interviewRounds entry uses "interviewer" — the field is called "interviewerName" (this data would be silently dropped)', label)
+        }
+      })
+    }
+
+    if (app?.jdUrl !== undefined && app?.jobUrl === undefined) {
+      flag('jdUrl', 'uses "jdUrl" — the field is called "jobUrl" (this data would be silently dropped)', label)
+    }
+    if (
+      app?.salary !== undefined &&
+      app?.salaryRangeMin === undefined &&
+      app?.salaryRangeMax === undefined &&
+      app?.salaryOffered === undefined
+    ) {
+      flag('salary', 'uses "salary" — expected "salaryRangeMin"/"salaryRangeMax"/"salaryOffered" (this data would be silently dropped)', label)
+    }
     if (!Array.isArray(app?.tags)) flag('tags', 'missing a "tags" array (use [] if none)', label)
     if (typeof app?.notes !== 'string') flag('notes', 'missing a "notes" string (use "" if none)', label)
     if (typeof app?.currency !== 'string' || !app.currency) flag('currency', 'missing "currency" (e.g. "USD")', label)
