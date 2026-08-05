@@ -16,6 +16,7 @@ import {
 } from '../types'
 import { loadState, saveState, StorageQuotaError } from '../lib/storage'
 import { isFuzzyMatch } from '../lib/fuzzyMatch'
+import { sanitizeApplications } from '../lib/sanitizeState'
 
 export interface NewApplicationInput {
   company: string
@@ -298,7 +299,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     importState(state) {
       set({
-        applications: state.applications,
+        applications: sanitizeApplications(state.applications),
         settings: { ...DEFAULT_SETTINGS, ...state.settings },
       })
       persistNow()
