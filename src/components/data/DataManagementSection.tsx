@@ -5,6 +5,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useAppStore } from '../../store/useAppStore'
 import { applicationsToCSV, downloadFile } from '../../lib/csv'
 import { estimateStorageUsage } from '../../lib/storage'
+import { validateImportedState } from '../../lib/validateImport'
 import { CURRENT_SCHEMA_VERSION, type PersistedState } from '../../types'
 
 export function DataManagementSection() {
@@ -18,6 +19,7 @@ export function DataManagementSection() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [pendingImport, setPendingImport] = useState<PersistedState | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [importIssues, setImportIssues] = useState<string[]>([])
 
   const usage = estimateStorageUsage()
   const usagePct = Math.min(100, Math.round(usage.ratio * 100))
@@ -37,19 +39,25 @@ export function DataManagementSection() {
     e.target.value = ''
     if (!file) return
     setImportError(null)
+    setImportIssues([])
 
     const reader = new FileReader()
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result))
-        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.applications)) {
-          setImportError('That file doesn’t look like a job-tracker backup.')
+        const result = validateImportedState(parsed)
+        if (!result.valid) {
+          setImportError(
+            `This file doesn't match the job-tracker backup format (${result.appCount} record(s) checked):`,
+          )
+          setImportIssues(result.issues)
           return
         }
+        const obj = parsed as any
         setPendingImport({
-          schemaVersion: parsed.schemaVersion ?? CURRENT_SCHEMA_VERSION,
-          applications: parsed.applications,
-          settings: parsed.settings ?? {},
+          schemaVersion: obj.schemaVersion ?? CURRENT_SCHEMA_VERSION,
+          applications: obj.applications,
+          settings: obj.settings ?? {},
         })
       } catch {
         setImportError('Could not parse that file as JSON.')
@@ -106,7 +114,18 @@ export function DataManagementSection() {
             Import JSON backup
           </Button>
         </div>
-        {importError && <p className="mt-1 text-xs text-danger">{importError}</p>}
+        {importError && (
+          <div className="mt-1.5 rounded-md border border-danger/30 bg-danger/5 p-sm">
+            <p className="text-xs text-danger">{importError}</p>
+            {importIssues.length > 0 && (
+              <ul className="mt-1.5 flex list-disc flex-col gap-0.5 pl-4 text-xs text-ink-muted">
+                {importIssues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
       <div>
