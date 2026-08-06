@@ -13,6 +13,7 @@ import { MetricCard } from './MetricCard'
 import { TrendChart } from './TrendChart'
 import { BreakdownTable } from './BreakdownTable'
 import { Button } from '../ui/Button'
+import { StatusDot } from '../ui/StatusDot'
 import { formatDate } from '../../lib/dates'
 
 export function AnalyticsPage() {
@@ -75,7 +76,10 @@ export function AnalyticsPage() {
               <div className="flex flex-col gap-1">
                 {STATUSES.map((s) => (
                   <div key={s} className="flex items-center justify-between text-xs">
-                    <span className="text-ink-muted">{STATUS_LABELS[s]}</span>
+                    <span className="flex items-center gap-1.5 text-ink-muted">
+                      <StatusDot status={s} />
+                      {STATUS_LABELS[s]}
+                    </span>
                     <span className="text-ink-tertiary">
                       {avgTimeInStage[s] === undefined ? '—' : `${avgTimeInStage[s]!.toFixed(1)}d`}
                     </span>

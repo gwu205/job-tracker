@@ -1,10 +1,10 @@
 import { useDraggable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import clsx from 'clsx'
-import type { JobApplication, Status } from '../../types'
-import { STATUSES, STATUS_LABELS, WORKSTYLE_LABELS } from '../../types'
-import { Select } from '../ui/Field'
+import type { JobApplication } from '../../types'
+import { WORKSTYLE_LABELS } from '../../types'
 import { Badge } from '../ui/Badge'
+import { StatusSelect } from '../ui/StatusSelect'
 import { formatDate, ordinal } from '../../lib/dates'
 import { isStale, lastStatusChangeAt, roleGroupIndex } from '../../lib/applications'
 import { useAppStore } from '../../store/useAppStore'
@@ -76,22 +76,13 @@ export function ApplicationCard({ app, onOpen }: ApplicationCardProps) {
 
       <div className="mt-sm flex items-center justify-between gap-2">
         <span className="text-xs text-ink-tertiary">{formatDate(app.dateApplied)}</span>
-        <label className="sr-only" htmlFor={`status-${app.id}`}>
-          Change status for {app.company} {app.position}
-        </label>
-        <Select
+        <StatusSelect
           id={`status-${app.id}`}
           value={app.status}
-          onChange={(e) => changeStatus(app.id, e.target.value as Status)}
+          onChange={(newStatus) => changeStatus(app.id, newStatus)}
           onClick={(e) => e.stopPropagation()}
-          className="w-auto py-0.5 px-1.5 text-xs"
-        >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_LABELS[s]}
-            </option>
-          ))}
-        </Select>
+          aria-label={`Change status for ${app.company} ${app.position}`}
+        />
       </div>
     </div>
   )

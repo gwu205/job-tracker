@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import type { JobApplication, Status } from '../../types'
 import { STATUS_LABELS } from '../../types'
 import { ApplicationCard } from './ApplicationCard'
+import { StatusDot } from '../ui/StatusDot'
 
 interface KanbanColumnProps {
   status: Status
@@ -16,7 +17,8 @@ export function KanbanColumn({ status, applications, onOpenApplication }: Kanban
   return (
     <div className="flex w-72 shrink-0 flex-col rounded-lg bg-surface-2/40">
       <div className="flex items-center justify-between px-sm py-xs">
-        <h3 className="font-display text-xs font-semibold uppercase tracking-wide text-ink-subtle">
+        <h3 className="flex items-center gap-1.5 font-display text-xs font-semibold uppercase tracking-wide text-ink-subtle">
+          <StatusDot status={status} />
           {STATUS_LABELS[status]}
         </h3>
         <span className="text-xs text-ink-tertiary">{applications.length}</span>

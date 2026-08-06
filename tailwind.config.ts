@@ -34,6 +34,8 @@ export default {
         success: '#27a644',
         danger: '#e5484d',
         warning: '#e5a000',
+        info: '#4c9eeb',
+        neutral: '#8a8f98',
       },
       fontFamily: {
         display: ['Inter', '-apple-system', 'system-ui', 'Segoe UI', 'Roboto', 'sans-serif'],
