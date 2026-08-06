@@ -1,5 +1,8 @@
+import { useMemo } from 'react'
 import { SOURCES, SOURCE_LABELS, WORKSTYLES, WORKSTYLE_LABELS } from '../../types'
 import { Input, Select, Textarea, Label, FieldGroup } from '../ui/Field'
+import { useAppStore } from '../../store/useAppStore'
+import { collectFieldSuggestions } from '../../lib/suggestions'
 import type { FieldsState } from './fieldsState'
 
 interface ApplicationFieldsProps {
@@ -15,17 +18,64 @@ const PRIORITY_OPTIONS = [
   { value: 5, label: '5 — Top pick' },
 ]
 
+function DataList({ id, options }: { id: string; options: string[] }) {
+  if (options.length === 0) return null
+  return (
+    <datalist id={id}>
+      {options.map((o) => (
+        <option key={o} value={o} />
+      ))}
+    </datalist>
+  )
+}
+
 export function ApplicationFields({ fields, onChange }: ApplicationFieldsProps) {
+  const applications = useAppStore((s) => s.applications)
+
+  // Distinct prior values per field, offered as native <datalist> suggestions — fields where
+  // the same value tends to repeat across applications (company, location, resume version,
+  // recruiter contacts, ...). Free-text fields that are naturally unique per application
+  // (job URL, notes) are left out.
+  const suggestions = useMemo(
+    () => ({
+      company: collectFieldSuggestions(applications, (a) => a.company),
+      position: collectFieldSuggestions(applications, (a) => a.position),
+      sourceLabel: collectFieldSuggestions(applications, (a) => a.sourceLabel),
+      recruiterName: collectFieldSuggestions(applications, (a) => a.recruiterName),
+      recruiterEmail: collectFieldSuggestions(applications, (a) => a.recruiterEmail),
+      recruiterPhone: collectFieldSuggestions(applications, (a) => a.recruiterPhone),
+      location: collectFieldSuggestions(applications, (a) => a.location),
+      currency: collectFieldSuggestions(applications, (a) => a.currency),
+      resumeVersion: collectFieldSuggestions(applications, (a) => a.resumeVersion),
+      rejectionReason: collectFieldSuggestions(applications, (a) => a.rejectionReason),
+    }),
+    [applications],
+  )
+
   return (
     <div className="flex flex-col gap-md">
       <div className="grid grid-cols-2 gap-3">
         <FieldGroup>
           <Label htmlFor="f-company">Company *</Label>
-          <Input id="f-company" required value={fields.company} onChange={(e) => onChange({ company: e.target.value })} />
+          <Input
+            id="f-company"
+            required
+            list="dl-company"
+            value={fields.company}
+            onChange={(e) => onChange({ company: e.target.value })}
+          />
+          <DataList id="dl-company" options={suggestions.company} />
         </FieldGroup>
         <FieldGroup>
           <Label htmlFor="f-position">Position *</Label>
-          <Input id="f-position" required value={fields.position} onChange={(e) => onChange({ position: e.target.value })} />
+          <Input
+            id="f-position"
+            required
+            list="dl-position"
+            value={fields.position}
+            onChange={(e) => onChange({ position: e.target.value })}
+          />
+          <DataList id="dl-position" options={suggestions.position} />
         </FieldGroup>
       </div>
 
@@ -68,9 +118,11 @@ export function ApplicationFields({ fields, onChange }: ApplicationFieldsProps) 
             <Label htmlFor="f-source-label">Source detail</Label>
             <Input
               id="f-source-label"
+              list="dl-source-label"
               value={fields.sourceLabel}
               onChange={(e) => onChange({ sourceLabel: e.target.value })}
             />
+            <DataList id="dl-source-label" options={suggestions.sourceLabel} />
           </FieldGroup>
         )}
       </div>
@@ -80,25 +132,35 @@ export function ApplicationFields({ fields, onChange }: ApplicationFieldsProps) 
         <div className="grid grid-cols-3 gap-3">
           <FieldGroup>
             <Label htmlFor="f-rec-name">Name</Label>
-            <Input id="f-rec-name" value={fields.recruiterName} onChange={(e) => onChange({ recruiterName: e.target.value })} />
+            <Input
+              id="f-rec-name"
+              list="dl-rec-name"
+              value={fields.recruiterName}
+              onChange={(e) => onChange({ recruiterName: e.target.value })}
+            />
+            <DataList id="dl-rec-name" options={suggestions.recruiterName} />
           </FieldGroup>
           <FieldGroup>
             <Label htmlFor="f-rec-email">Email</Label>
             <Input
               id="f-rec-email"
               type="email"
+              list="dl-rec-email"
               value={fields.recruiterEmail}
               onChange={(e) => onChange({ recruiterEmail: e.target.value })}
             />
+            <DataList id="dl-rec-email" options={suggestions.recruiterEmail} />
           </FieldGroup>
           <FieldGroup>
             <Label htmlFor="f-rec-phone">Phone</Label>
             <Input
               id="f-rec-phone"
               type="tel"
+              list="dl-rec-phone"
               value={fields.recruiterPhone}
               onChange={(e) => onChange({ recruiterPhone: e.target.value })}
             />
+            <DataList id="dl-rec-phone" options={suggestions.recruiterPhone} />
           </FieldGroup>
         </div>
       </fieldset>
@@ -121,7 +183,13 @@ export function ApplicationFields({ fields, onChange }: ApplicationFieldsProps) 
         </FieldGroup>
         <FieldGroup>
           <Label htmlFor="f-location">Location / city</Label>
-          <Input id="f-location" value={fields.location} onChange={(e) => onChange({ location: e.target.value })} />
+          <Input
+            id="f-location"
+            list="dl-location"
+            value={fields.location}
+            onChange={(e) => onChange({ location: e.target.value })}
+          />
+          <DataList id="dl-location" options={suggestions.location} />
         </FieldGroup>
       </div>
 
@@ -157,7 +225,13 @@ export function ApplicationFields({ fields, onChange }: ApplicationFieldsProps) 
           </FieldGroup>
           <FieldGroup>
             <Label htmlFor="f-currency">Currency</Label>
-            <Input id="f-currency" value={fields.currency} onChange={(e) => onChange({ currency: e.target.value })} />
+            <Input
+              id="f-currency"
+              list="dl-currency"
+              value={fields.currency}
+              onChange={(e) => onChange({ currency: e.target.value })}
+            />
+            <DataList id="dl-currency" options={suggestions.currency} />
           </FieldGroup>
         </div>
       </fieldset>
@@ -181,10 +255,12 @@ export function ApplicationFields({ fields, onChange }: ApplicationFieldsProps) 
           <Label htmlFor="f-resume">Resume / cover letter version</Label>
           <Input
             id="f-resume"
+            list="dl-resume"
             placeholder="e.g. resume_v3_swe"
             value={fields.resumeVersion}
             onChange={(e) => onChange({ resumeVersion: e.target.value })}
           />
+          <DataList id="dl-resume" options={suggestions.resumeVersion} />
         </FieldGroup>
       </div>
 
@@ -202,9 +278,11 @@ export function ApplicationFields({ fields, onChange }: ApplicationFieldsProps) 
         <Label htmlFor="f-rejection">Rejection reason</Label>
         <Input
           id="f-rejection"
+          list="dl-rejection"
           value={fields.rejectionReason}
           onChange={(e) => onChange({ rejectionReason: e.target.value })}
         />
+        <DataList id="dl-rejection" options={suggestions.rejectionReason} />
       </FieldGroup>
 
       <FieldGroup>
