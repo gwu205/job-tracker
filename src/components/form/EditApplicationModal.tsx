@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
+import clsx from 'clsx'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
-import { Select, Label } from '../ui/Field'
+import { Label } from '../ui/Field'
 import { Badge } from '../ui/Badge'
+import { StatusSelect } from '../ui/StatusSelect'
+import { StatusDot } from '../ui/StatusDot'
 import { ApplicationFields } from './ApplicationFields'
 import { InterviewRoundsEditor } from './InterviewRoundsEditor'
 import { StatusHistoryEditor } from './StatusHistoryEditor'
 import { fieldsFromApp, buildScalarPayload, type FieldsState } from './fieldsState'
 import { useAppStore } from '../../store/useAppStore'
-import { STATUSES, STATUS_LABELS, type Status } from '../../types'
+import { STATUS_LABELS } from '../../types'
+import { STATUS_COLOR_CLASSES } from '../../lib/statusColors'
 import { formatDate, ordinal } from '../../lib/dates'
 import { roleGroupIndex } from '../../lib/applications'
 
@@ -88,9 +92,13 @@ export function EditApplicationModal({ applicationId, onClose, onOpenApplication
                     type="button"
                     onClick={() => onOpenApplication(g.id)}
                     disabled={g.id === app.id}
-                    className="disabled:cursor-default"
+                    className={clsx(
+                      'disabled:cursor-default',
+                      g.id === app.id ? 'rounded-pill ring-1 ring-primary/50' : 'hover:opacity-80',
+                    )}
                   >
-                    <Badge className={g.id === app.id ? 'bg-primary/20 text-primary' : 'hover:bg-surface-3'}>
+                    <Badge className={clsx('gap-1.5', STATUS_COLOR_CLASSES[g.status].text)}>
+                      <StatusDot status={g.status} />
                       {formatDate(g.dateApplied)} · {STATUS_LABELS[g.status]}
                     </Badge>
                   </button>
@@ -101,18 +109,7 @@ export function EditApplicationModal({ applicationId, onClose, onOpenApplication
 
           <div className="flex items-center gap-2">
             <Label htmlFor="current-status">Current status</Label>
-            <Select
-              id="current-status"
-              value={app.status}
-              onChange={(e) => changeStatus(app.id, e.target.value as Status)}
-              className="w-auto py-1"
-            >
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABELS[s]}
-                </option>
-              ))}
-            </Select>
+            <StatusSelect id="current-status" value={app.status} onChange={(newStatus) => changeStatus(app.id, newStatus)} />
             <span className="text-xs text-ink-tertiary">Changing this logs a new timestamped status-history entry.</span>
           </div>
 
