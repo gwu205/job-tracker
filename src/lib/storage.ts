@@ -1,4 +1,5 @@
 import { CURRENT_SCHEMA_VERSION, DEFAULT_SETTINGS, type PersistedState } from '../types'
+import { sanitizeApplications } from './sanitizeState'
 
 const STORAGE_KEY = 'job-tracker:data'
 
@@ -38,7 +39,9 @@ export function loadState(): PersistedState {
     const migrated = migrate(parsed)
     return {
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      applications: migrated.applications ?? [],
+      // Repairs any record that predates a validation fix (or was written some other way) so a
+      // corrupt field can't crash the app on every load — see sanitizeState.ts.
+      applications: sanitizeApplications(migrated.applications),
       settings: { ...DEFAULT_SETTINGS, ...(migrated.settings ?? {}) },
     }
   } catch {
