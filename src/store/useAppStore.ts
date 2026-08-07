@@ -17,6 +17,17 @@ import {
 import { loadState, saveState, StorageQuotaError } from '../lib/storage'
 import { isFuzzyMatch } from '../lib/fuzzyMatch'
 import { sanitizeApplications } from '../lib/sanitizeState'
+import {
+  isFileSyncSupported,
+  createNewSyncFile,
+  openExistingSyncFile,
+  reconnectSyncFile,
+  disconnectSyncFile as forgetSyncFileHandle,
+  readSyncFileText,
+  writeSyncFileText,
+  parseSyncFileText,
+  serializeForSyncFile,
+} from '../lib/fileSync'
 
 export interface NewApplicationInput {
   company: string
@@ -49,10 +60,16 @@ interface CreateOptions {
   linkToId?: string
 }
 
+export type SyncStatus = 'disconnected' | 'connected' | 'error'
+
 interface AppState {
   applications: JobApplication[]
   settings: AppSettings
   storageError: string | null
+
+  syncFileName: string | null
+  syncStatus: SyncStatus
+  syncError: string | null
 
   findActiveDuplicate: (company: string, position: string, excludeId?: string) => JobApplication | undefined
   findLinkablePriorApplications: (company: string, position: string) => JobApplication[]
@@ -75,6 +92,20 @@ interface AppState {
   clearAllData: () => void
   exportState: () => PersistedState
   importState: (state: PersistedState) => void
+
+  /** Reconnects a previously-chosen sync file on app load, if any. No-op if unsupported or never connected. */
+  initFileSync: () => Promise<void>
+  connectNewSyncFile: () => Promise<void>
+  /**
+   * Opens the picker and connects the chosen file, but does NOT apply its contents if it already
+   * has data — that would silently blow away what's on screen. The caller (Settings UI) confirms
+   * with the user first, then either calls `importState(remoteState)` or `disconnectSyncFile()`
+   * to back out cleanly rather than leaving a half-connected file the app would later overwrite.
+   */
+  connectExistingSyncFile: () => Promise<{ hadExistingData: boolean; remoteState: PersistedState | null }>
+  disconnectSyncFile: () => Promise<void>
+  /** Re-reads the connected file; applies its contents if changed since we last read or wrote it. Safe to call on an interval. */
+  pollSyncFile: () => Promise<void>
 }
 
 function nowISO(): string {
@@ -101,15 +132,35 @@ function persist(applications: JobApplication[], settings: AppSettings, setError
 const initial = loadState()
 
 export const useAppStore = create<AppState>((set, get) => {
+  // Not part of reactive state — nothing needs to re-render when these change, they're just
+  // bookkeeping for the file-sync feature.
+  let fileHandle: FileSystemFileHandle | null = null
+  let lastSyncedText: string | null = null
+
   const persistNow = () => {
     const { applications, settings } = get()
     persist(applications, settings, (e) => set({ storageError: e }))
+
+    if (fileHandle) {
+      const handle = fileHandle
+      const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
+      // Written before the await resolves so a poll racing this write treats it as already seen
+      // rather than looping back and re-applying our own change.
+      lastSyncedText = serialized
+      writeSyncFileText(handle, serialized).catch((err) => {
+        set({ syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not write sync file.' })
+      })
+    }
   }
 
   return {
     applications: initial.applications,
     settings: initial.settings,
     storageError: null,
+
+    syncFileName: null,
+    syncStatus: 'disconnected',
+    syncError: null,
 
     findActiveDuplicate(company, position, excludeId) {
       return get().applications.find(
@@ -303,6 +354,85 @@ export const useAppStore = create<AppState>((set, get) => {
         settings: { ...DEFAULT_SETTINGS, ...state.settings },
       })
       persistNow()
+    },
+
+    async initFileSync() {
+      if (!isFileSyncSupported()) return
+      try {
+        const handle = await reconnectSyncFile()
+        if (!handle) return
+        fileHandle = handle
+
+        const text = await readSyncFileText(handle)
+        const parsed = parseSyncFileText(text)
+        if (parsed) {
+          lastSyncedText = text
+          set({ applications: parsed.applications, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } })
+        } else {
+          // Handle from a previous session pointed at a file that's now empty/unreadable — reseed it.
+          const { applications, settings } = get()
+          const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
+          lastSyncedText = serialized
+          await writeSyncFileText(handle, serialized)
+        }
+        set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
+      } catch (err) {
+        set({ syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not reconnect sync file.' })
+      }
+    },
+
+    async connectNewSyncFile() {
+      const handle = await createNewSyncFile()
+      fileHandle = handle
+      const { applications, settings } = get()
+      const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
+      lastSyncedText = serialized
+      await writeSyncFileText(handle, serialized)
+      set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
+    },
+
+    async connectExistingSyncFile() {
+      const handle = await openExistingSyncFile()
+      fileHandle = handle
+      const text = await readSyncFileText(handle)
+      const parsed = parseSyncFileText(text)
+
+      if (parsed && parsed.applications.length > 0) {
+        // Track the handle so a confirmed import (or a later write) works, but leave lastSyncedText
+        // unset until the caller actually commits — see the JSDoc on this action's type.
+        set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
+        return { hadExistingData: true, remoteState: parsed }
+      }
+
+      const { applications, settings } = get()
+      const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
+      lastSyncedText = serialized
+      await writeSyncFileText(handle, serialized)
+      set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
+      return { hadExistingData: false, remoteState: null }
+    },
+
+    async disconnectSyncFile() {
+      await forgetSyncFileHandle()
+      fileHandle = null
+      lastSyncedText = null
+      set({ syncFileName: null, syncStatus: 'disconnected', syncError: null })
+    },
+
+    async pollSyncFile() {
+      if (!fileHandle) return
+      try {
+        const text = await readSyncFileText(fileHandle)
+        if (text === lastSyncedText) return
+        const parsed = parseSyncFileText(text)
+        if (!parsed) return
+        lastSyncedText = text
+        set({ applications: parsed.applications, settings: { ...get().settings, ...parsed.settings } })
+        // Mirror into localStorage without writing back to the file we just read from.
+        persist(parsed.applications, get().settings, (e) => set({ storageError: e }))
+      } catch (err) {
+        set({ syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not read sync file.' })
+      }
     },
   }
 })
