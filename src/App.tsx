@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { useAppStore } from './store/useAppStore'
 import { KanbanBoard } from './components/board/KanbanBoard'
@@ -21,8 +21,13 @@ const TABS: { id: View; label: string }[] = [
   { id: 'settings', label: 'Settings' },
 ]
 
+const SYNC_POLL_INTERVAL_MS = 8000
+
 function App() {
   const applications = useAppStore((s) => s.applications)
+  const syncStatus = useAppStore((s) => s.syncStatus)
+  const initFileSync = useAppStore((s) => s.initFileSync)
+  const pollSyncFile = useAppStore((s) => s.pollSyncFile)
 
   const [view, setView] = useState<View>('board')
   const [filters, setFilters] = useState<FilterState>(defaultFilterState())
@@ -33,6 +38,29 @@ function App() {
 
   const filteredApps = useMemo(() => applyFilters(applications, filters), [applications, filters])
   const availableTags = useMemo(() => collectTags(applications), [applications])
+
+  // Reconnect a previously-chosen sync file (if any) once on load.
+  useEffect(() => {
+    initFileSync()
+  }, [initFileSync])
+
+  // While connected, pick up changes written elsewhere (e.g. by an MCP server) on an interval and
+  // whenever the tab regains focus — there's no native "watch this file" event to hook instead.
+  useEffect(() => {
+    if (syncStatus !== 'connected') return
+    const poll = () => pollSyncFile()
+    const interval = setInterval(poll, SYNC_POLL_INTERVAL_MS)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') poll()
+    }
+    window.addEventListener('focus', poll)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('focus', poll)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [syncStatus, pollSyncFile])
 
   function openCreate(prefill?: Partial<FieldsState>) {
     setCreatePrefill(prefill)

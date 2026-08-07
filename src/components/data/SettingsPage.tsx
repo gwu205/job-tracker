@@ -1,5 +1,6 @@
 import { LookbackPeriodSection } from './LookbackPeriodSection'
 import { DataManagementSection } from './DataManagementSection'
+import { MCPSyncSection } from './MCPSyncSection'
 import { AISettingsSection } from '../ai/AISettingsSection'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -20,6 +21,9 @@ export function SettingsPage() {
         </Section>
         <Section title="AI-assisted entry">
           <AISettingsSection />
+        </Section>
+        <Section title="MCP sync">
+          <MCPSyncSection />
         </Section>
         <section className="pb-lg">
           <h2 className="mb-sm font-display text-base font-semibold text-ink">Data management</h2>
