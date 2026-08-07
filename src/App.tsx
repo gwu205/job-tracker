@@ -69,7 +69,7 @@ function App() {
         </nav>
         <div className="ml-auto flex gap-2">
           <Button variant="secondary" onClick={() => setAiOpen(true)}>
-            Add via AI
+            Paste to add
           </Button>
           <Button variant="primary" onClick={() => openCreate()}>
             + New application

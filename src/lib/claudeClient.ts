@@ -12,6 +12,7 @@ export interface ParsedApplicationFields {
   location?: string
   salaryRangeMin?: number
   salaryRangeMax?: number
+  currency?: string
   notes?: string
 }
 
@@ -48,6 +49,10 @@ export async function parseJobTextWithClaude(apiKey: string, text: string): Prom
               location: { type: 'string' },
               salaryRangeMin: { type: 'number' },
               salaryRangeMax: { type: 'number' },
+              currency: {
+                type: 'string',
+                description: 'ISO currency code (e.g. USD, EUR, JPY) if a salary or compensation figure is mentioned.',
+              },
               notes: {
                 type: 'string',
                 description: 'A short freetext summary of anything relevant not captured in the other fields.',

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
@@ -30,6 +30,19 @@ export function CreateApplicationModal({ open, onClose, onCreated, onOpenApplica
     { id: uuid(), status: 'saved', timestamp: new Date().toISOString() },
   ])
   const [duplicate, setDuplicate] = useState<JobApplication | null>(null)
+
+  // The modal is always mounted (visibility is just the `open` prop), so the useState
+  // initializers above only ever see the very first `prefill` — re-sync from the latest one
+  // each time it's actually opened (e.g. a fresh AI/quick-parse result).
+  useEffect(() => {
+    if (open) {
+      setFields({ ...defaultFields(), ...prefill })
+      setRounds([])
+      setHistory([{ id: uuid(), status: 'saved', timestamp: new Date().toISOString() }])
+      setDuplicate(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefill])
 
   if (!open) return null
 
