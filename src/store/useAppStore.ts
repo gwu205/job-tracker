@@ -365,17 +365,27 @@ export const useAppStore = create<AppState>((set, get) => {
 
         const text = await readSyncFileText(handle)
         const parsed = parseSyncFileText(text)
-        if (parsed) {
+        const { applications: localApplications, settings: localSettings } = get()
+        const remoteIsSuspiciouslyEmpty = parsed?.applications.length === 0 && localApplications.length > 0
+
+        if (parsed && !remoteIsSuspiciouslyEmpty) {
           lastSyncedText = text
           set({ applications: parsed.applications, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } })
         } else {
-          // Handle from a previous session pointed at a file that's now empty/unreadable — reseed it.
-          const { applications, settings } = get()
-          const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
+          // Handle from a previous session pointed at a file that's now empty/unreadable, or the
+          // file has no applications while we still have local ones — never let that silently wipe
+          // a non-empty board. Reseed the file from local data instead of trusting the remote.
+          const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications: localApplications, settings: localSettings })
           lastSyncedText = serialized
           await writeSyncFileText(handle, serialized)
         }
-        set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
+        set({
+          syncFileName: handle.name,
+          syncStatus: 'connected',
+          syncError: remoteIsSuspiciouslyEmpty
+            ? 'Sync file was unexpectedly empty — kept your local data and rewrote the file from it.'
+            : null,
+        })
       } catch (err) {
         set({ syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not reconnect sync file.' })
       }
@@ -426,6 +436,19 @@ export const useAppStore = create<AppState>((set, get) => {
         if (text === lastSyncedText) return
         const parsed = parseSyncFileText(text)
         if (!parsed) return
+
+        const { applications: localApplications, settings: localSettings } = get()
+        if (parsed.applications.length === 0 && localApplications.length > 0) {
+          // The file went empty (e.g. an external process created/reset it) while we still have a
+          // non-empty local board — don't let that silently wipe local + localStorage. Repair the
+          // file from local data instead of applying the empty remote state.
+          const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications: localApplications, settings: localSettings })
+          lastSyncedText = serialized
+          await writeSyncFileText(fileHandle, serialized)
+          set({ syncStatus: 'error', syncError: 'Sync file was unexpectedly empty — restored it from local data instead of overwriting your board.' })
+          return
+        }
+
         lastSyncedText = text
         set({ applications: parsed.applications, settings: { ...get().settings, ...parsed.settings } })
         // Mirror into localStorage without writing back to the file we just read from.
