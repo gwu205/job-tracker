@@ -73,9 +73,9 @@ export function AIParseModal({ open, onClose, onParsed, onGoToSettings }: AIPars
       <div className="flex flex-col gap-3">
         <p className="text-xs text-ink-tertiary">
           Paste a job posting, a forwarded recruiter email, or a LinkedIn message, then either quick-parse it locally
-          (pulls out email, phone, salary range, workstyle — no account or API key needed) or send it to Claude for
-          fuller extraction (company, position, and more). Either way you'll review and confirm before anything is
-          saved.
+          (email, phone, salary range, workstyle, plus company/position if explicitly labeled — no account or API key
+          needed) or send it to Claude for fuller extraction, including company/position from unstructured text.
+          Either way you'll review and confirm before anything is saved.
         </p>
 
         <FieldGroup>

@@ -5,6 +5,8 @@ const EMAIL_RE = /[\w.+-]+@[\w-]+\.[a-zA-Z.]{2,}/
 const PHONE_RE = /(\+?[\d(][\d\-.\s()]{6,}\d)/
 const URL_RE = /https?:\/\/[^\s)]+/i
 const LOCATION_LABEL_RE = /location\s*[:\-]\s*([^\n]+)/i
+const COMPANY_LABEL_RE = /\b(?:company|employer|organization)\s*[:\-]\s*([^\n]+)/i
+const POSITION_LABEL_RE = /\b(?:job title|position|role|title)\s*[:\-]\s*([^\n]+)/i
 
 const CURRENCY_TOKEN = '(USD|EUR|GBP|JPY|CAD|AUD|NZD|SGD|[$€£¥₹])'
 const NUMBER_TOKEN = '([\\d,]+(?:\\.\\d+)?)\\s?(k|K)?'
@@ -39,10 +41,12 @@ function detectWorkstyle(text: string): Workstyle | undefined {
 
 /**
  * Best-effort extraction of the fields that have a reliable, regex-detectable shape — no
- * network call, no API key. Deliberately does NOT attempt company/position/etc.: guessing
- * those from unstructured prose without an LLM produces confidently wrong values, which is
- * worse than leaving the field blank for the user to fill in. The full pasted text goes into
- * notes so nothing found this way is lost.
+ * network call, no API key. Company/position are only filled from an explicit label ("Company:",
+ * "Job Title:", ...) — the kind of structure a forwarded recruiter email or ATS posting often
+ * has. Deliberately does NOT try to guess them from unstructured prose (e.g. "first line" or
+ * "X at Y" patterns): without an LLM actually reading the text, those produce confidently wrong
+ * values often enough that a blank field is the safer default. The full pasted text always goes
+ * into notes so nothing found this way is lost.
  */
 export function parseJobTextHeuristically(text: string): ParsedApplicationFields {
   const fields: ParsedApplicationFields = { notes: text.trim() }
@@ -58,6 +62,12 @@ export function parseJobTextHeuristically(text: string): ParsedApplicationFields
 
   const location = text.match(LOCATION_LABEL_RE)?.[1]?.trim()
   if (location) fields.location = location
+
+  const company = text.match(COMPANY_LABEL_RE)?.[1]?.trim()
+  if (company) fields.company = company
+
+  const position = text.match(POSITION_LABEL_RE)?.[1]?.trim()
+  if (position) fields.position = position
 
   const workstyle = detectWorkstyle(text)
   if (workstyle && WORKSTYLES.includes(workstyle)) fields.workstyle = workstyle
