@@ -1,0 +1,20 @@
+{
+  "name": "job-tracker-mcp-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local MCP server exposing job-tracker read/write tools over the same JSON sync file the browser app connects to.",
+  "scripts": {
+    "start": "tsx index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.9",
+    "typescript": "^5.6.3"
+  }
+}
