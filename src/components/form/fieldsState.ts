@@ -88,6 +88,7 @@ export function fieldsFromParsed(parsed: ParsedApplicationFields): Partial<Field
   if (parsed.location) patch.location = parsed.location
   if (parsed.salaryRangeMin !== undefined) patch.salaryRangeMin = String(parsed.salaryRangeMin)
   if (parsed.salaryRangeMax !== undefined) patch.salaryRangeMax = String(parsed.salaryRangeMax)
+  if (parsed.currency) patch.currency = parsed.currency
   if (parsed.notes) patch.notes = parsed.notes
   return patch
 }
