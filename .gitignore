@@ -7,3 +7,5 @@ dist-ssr
 .env
 .env.local
 *.log
+.dev.vars
+.wrangler

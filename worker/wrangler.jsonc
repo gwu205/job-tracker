@@ -1,0 +1,13 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "job-tracker-sync",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-01-01",
+	"kv_namespaces": [
+		{
+			"binding": "job_tracker_state",
+			"id": "a318c16e7b1249df8b4469706160b49b",
+			"remote": true
+		}
+	]
+}

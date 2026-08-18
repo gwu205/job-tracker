@@ -18,16 +18,14 @@ import { loadState, saveState, StorageQuotaError } from '../lib/storage'
 import { isFuzzyMatch } from '../lib/fuzzyMatch'
 import { sanitizeApplications } from '../lib/sanitizeState'
 import {
-  isFileSyncSupported,
-  createNewSyncFile,
-  openExistingSyncFile,
-  reconnectSyncFile,
-  disconnectSyncFile as forgetSyncFileHandle,
-  readSyncFileText,
-  writeSyncFileText,
-  parseSyncFileText,
-  serializeForSyncFile,
-} from '../lib/fileSync'
+  loadApiConfig,
+  saveApiConfig,
+  clearApiConfig,
+  fetchRemoteState,
+  pushRemoteState,
+  UnauthorizedError,
+  type ApiSyncConfig,
+} from '../lib/apiSync'
 
 export interface NewApplicationInput {
   company: string
@@ -60,14 +58,14 @@ interface CreateOptions {
   linkToId?: string
 }
 
-export type SyncStatus = 'disconnected' | 'connected' | 'error'
+export type SyncStatus = 'disconnected' | 'connected' | 'error' | 'unauthorized'
 
 interface AppState {
   applications: JobApplication[]
   settings: AppSettings
   storageError: string | null
 
-  syncFileName: string | null
+  apiSyncUrl: string | null
   syncStatus: SyncStatus
   syncError: string | null
 
@@ -93,19 +91,17 @@ interface AppState {
   exportState: () => PersistedState
   importState: (state: PersistedState) => void
 
-  /** Reconnects a previously-chosen sync file on app load, if any. No-op if unsupported or never connected. */
-  initFileSync: () => Promise<void>
-  connectNewSyncFile: () => Promise<void>
+  /** Reconnects using a previously-saved API URL + token on app load, if any. No-op if never configured. */
+  initApiSync: () => Promise<void>
   /**
-   * Opens the picker and connects the chosen file, but does NOT apply its contents if it already
-   * has data — that would silently blow away what's on screen. The caller (Settings UI) confirms
-   * with the user first, then either calls `importState(remoteState)` or `disconnectSyncFile()`
-   * to back out cleanly rather than leaving a half-connected file the app would later overwrite.
+   * Saves a new URL + token and connects. If the remote is empty and local has data, seeds the
+   * remote from local (first-connect migration case) instead of treating an empty remote as "wipe
+   * local." Otherwise applies whatever the remote already has.
    */
-  connectExistingSyncFile: () => Promise<{ hadExistingData: boolean; remoteState: PersistedState | null }>
-  disconnectSyncFile: () => Promise<void>
-  /** Re-reads the connected file; applies its contents if changed since we last read or wrote it. Safe to call on an interval. */
-  pollSyncFile: () => Promise<void>
+  connectApiSync: (config: ApiSyncConfig) => Promise<void>
+  disconnectApiSync: () => void
+  /** Re-fetches remote state; applies it if changed since we last read or wrote it. Safe to call on an interval. */
+  pollApiSync: () => Promise<void>
 }
 
 function nowISO(): string {
@@ -131,26 +127,55 @@ function persist(applications: JobApplication[], settings: AppSettings, setError
 
 const initial = loadState()
 
-export const useAppStore = create<AppState>((set, get) => {
-  // Not part of reactive state — nothing needs to re-render when these change, they're just
-  // bookkeeping for the file-sync feature.
-  let fileHandle: FileSystemFileHandle | null = null
-  let lastSyncedText: string | null = null
+function syncStatusForError(err: unknown): { syncStatus: SyncStatus; syncError: string } {
+  if (err instanceof UnauthorizedError) return { syncStatus: 'unauthorized', syncError: err.message }
+  return { syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not reach sync server.' }
+}
 
-  const persistNow = () => {
+export const useAppStore = create<AppState>((set, get) => {
+  // Not part of reactive state — nothing needs to re-render when this changes, it's just
+  // bookkeeping for the API-sync feature (change detection between polls).
+  let lastSyncedJson: string | null = null
+
+  const persistNow = (opts?: { force?: boolean }) => {
     const { applications, settings } = get()
     persist(applications, settings, (e) => set({ storageError: e }))
 
-    if (fileHandle) {
-      const handle = fileHandle
-      const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
+    const config = loadApiConfig()
+    if (config) {
+      const stateToSend: PersistedState = { schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings }
       // Written before the await resolves so a poll racing this write treats it as already seen
       // rather than looping back and re-applying our own change.
-      lastSyncedText = serialized
-      writeSyncFileText(handle, serialized).catch((err) => {
-        set({ syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not write sync file.' })
-      })
+      lastSyncedJson = JSON.stringify({ applications, settings })
+      pushRemoteState(config, stateToSend, opts).catch((err) => set(syncStatusForError(err)))
     }
+  }
+
+  /** Shared by initApiSync and connectApiSync once a config is in hand. */
+  const connectAndSync = async (config: ApiSyncConfig) => {
+    const remote = await fetchRemoteState(config)
+    const { applications: localApplications, settings: localSettings } = get()
+    const remoteIsSuspiciouslyEmpty = remote.applications.length === 0 && localApplications.length > 0
+
+    if (remoteIsSuspiciouslyEmpty) {
+      // First-connect seeding case (or the remote was reset): push local -> remote instead of
+      // trusting an empty remote. force:true because this is exactly the one case where writing
+      // an empty-turned-non-empty state over a genuinely-empty remote is correct, not a mistake.
+      const stateToSend: PersistedState = { schemaVersion: CURRENT_SCHEMA_VERSION, applications: localApplications, settings: localSettings }
+      await pushRemoteState(config, stateToSend, { force: true })
+      lastSyncedJson = JSON.stringify({ applications: localApplications, settings: localSettings })
+    } else {
+      lastSyncedJson = JSON.stringify({ applications: remote.applications, settings: remote.settings })
+      set({ applications: remote.applications, settings: { ...DEFAULT_SETTINGS, ...remote.settings } })
+      persist(remote.applications, { ...DEFAULT_SETTINGS, ...remote.settings }, (e) => set({ storageError: e }))
+    }
+    set({
+      apiSyncUrl: config.url,
+      syncStatus: 'connected',
+      syncError: remoteIsSuspiciouslyEmpty
+        ? 'Remote store was empty — pushed your local data to it as the starting point.'
+        : null,
+    })
   }
 
   return {
@@ -158,7 +183,7 @@ export const useAppStore = create<AppState>((set, get) => {
     settings: initial.settings,
     storageError: null,
 
-    syncFileName: null,
+    apiSyncUrl: null,
     syncStatus: 'disconnected',
     syncError: null,
 
@@ -340,7 +365,9 @@ export const useAppStore = create<AppState>((set, get) => {
 
     clearAllData() {
       set({ applications: [], settings: { ...DEFAULT_SETTINGS } })
-      persistNow()
+      // force:true — this is the one legitimate case that intentionally writes an empty
+      // applications array; without it the server's own empty-overwrite guard would reject it.
+      persistNow({ force: true })
     },
 
     exportState() {
@@ -356,105 +383,46 @@ export const useAppStore = create<AppState>((set, get) => {
       persistNow()
     },
 
-    async initFileSync() {
-      if (!isFileSyncSupported()) return
+    async initApiSync() {
+      const config = loadApiConfig()
+      if (!config) return
       try {
-        const handle = await reconnectSyncFile()
-        if (!handle) return
-        fileHandle = handle
-
-        const text = await readSyncFileText(handle)
-        const parsed = parseSyncFileText(text)
-        const { applications: localApplications, settings: localSettings } = get()
-        const remoteIsSuspiciouslyEmpty = parsed?.applications.length === 0 && localApplications.length > 0
-
-        if (parsed && !remoteIsSuspiciouslyEmpty) {
-          lastSyncedText = text
-          set({ applications: parsed.applications, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } })
-        } else {
-          // Handle from a previous session pointed at a file that's now empty/unreadable, or the
-          // file has no applications while we still have local ones — never let that silently wipe
-          // a non-empty board. Reseed the file from local data instead of trusting the remote.
-          const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications: localApplications, settings: localSettings })
-          lastSyncedText = serialized
-          await writeSyncFileText(handle, serialized)
-        }
-        set({
-          syncFileName: handle.name,
-          syncStatus: 'connected',
-          syncError: remoteIsSuspiciouslyEmpty
-            ? 'Sync file was unexpectedly empty — kept your local data and rewrote the file from it.'
-            : null,
-        })
+        await connectAndSync(config)
       } catch (err) {
-        set({ syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not reconnect sync file.' })
+        set(syncStatusForError(err))
       }
     },
 
-    async connectNewSyncFile() {
-      const handle = await createNewSyncFile()
-      fileHandle = handle
-      const { applications, settings } = get()
-      const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
-      lastSyncedText = serialized
-      await writeSyncFileText(handle, serialized)
-      set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
-    },
-
-    async connectExistingSyncFile() {
-      const handle = await openExistingSyncFile()
-      fileHandle = handle
-      const text = await readSyncFileText(handle)
-      const parsed = parseSyncFileText(text)
-
-      if (parsed && parsed.applications.length > 0) {
-        // Track the handle so a confirmed import (or a later write) works, but leave lastSyncedText
-        // unset until the caller actually commits — see the JSDoc on this action's type.
-        set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
-        return { hadExistingData: true, remoteState: parsed }
-      }
-
-      const { applications, settings } = get()
-      const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications, settings })
-      lastSyncedText = serialized
-      await writeSyncFileText(handle, serialized)
-      set({ syncFileName: handle.name, syncStatus: 'connected', syncError: null })
-      return { hadExistingData: false, remoteState: null }
-    },
-
-    async disconnectSyncFile() {
-      await forgetSyncFileHandle()
-      fileHandle = null
-      lastSyncedText = null
-      set({ syncFileName: null, syncStatus: 'disconnected', syncError: null })
-    },
-
-    async pollSyncFile() {
-      if (!fileHandle) return
+    async connectApiSync(config) {
+      saveApiConfig(config)
       try {
-        const text = await readSyncFileText(fileHandle)
-        if (text === lastSyncedText) return
-        const parsed = parseSyncFileText(text)
-        if (!parsed) return
-
-        const { applications: localApplications, settings: localSettings } = get()
-        if (parsed.applications.length === 0 && localApplications.length > 0) {
-          // The file went empty (e.g. an external process created/reset it) while we still have a
-          // non-empty local board — don't let that silently wipe local + localStorage. Repair the
-          // file from local data instead of applying the empty remote state.
-          const serialized = serializeForSyncFile({ schemaVersion: CURRENT_SCHEMA_VERSION, applications: localApplications, settings: localSettings })
-          lastSyncedText = serialized
-          await writeSyncFileText(fileHandle, serialized)
-          set({ syncStatus: 'error', syncError: 'Sync file was unexpectedly empty — restored it from local data instead of overwriting your board.' })
-          return
-        }
-
-        lastSyncedText = text
-        set({ applications: parsed.applications, settings: { ...get().settings, ...parsed.settings } })
-        // Mirror into localStorage without writing back to the file we just read from.
-        persist(parsed.applications, get().settings, (e) => set({ storageError: e }))
+        await connectAndSync(config)
       } catch (err) {
-        set({ syncStatus: 'error', syncError: err instanceof Error ? err.message : 'Could not read sync file.' })
+        // Config stays saved even on failure, so the UI can show what was attempted and let the
+        // user correct the token without re-typing the URL; disconnectApiSync clears it explicitly.
+        set(syncStatusForError(err))
+      }
+    },
+
+    disconnectApiSync() {
+      clearApiConfig()
+      lastSyncedJson = null
+      set({ apiSyncUrl: null, syncStatus: 'disconnected', syncError: null })
+    },
+
+    async pollApiSync() {
+      const config = loadApiConfig()
+      if (!config) return
+      try {
+        const remote = await fetchRemoteState(config)
+        const remoteJson = JSON.stringify({ applications: remote.applications, settings: remote.settings })
+        if (remoteJson === lastSyncedJson) return
+        lastSyncedJson = remoteJson
+        set({ applications: remote.applications, settings: { ...DEFAULT_SETTINGS, ...remote.settings } })
+        persist(remote.applications, { ...DEFAULT_SETTINGS, ...remote.settings }, (e) => set({ storageError: e }))
+        set({ syncStatus: 'connected', syncError: null })
+      } catch (err) {
+        set(syncStatusForError(err))
       }
     },
   }
