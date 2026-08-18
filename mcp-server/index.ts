@@ -1,7 +1,5 @@
 #!/usr/bin/env -S npx tsx
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
@@ -20,29 +18,26 @@ import {
 import { sanitizeApplications } from '../src/lib/sanitizeState.js'
 import { isFuzzyMatch } from '../src/lib/fuzzyMatch.js'
 
-const filePath = process.argv[2] ?? process.env.JOB_TRACKER_SYNC_FILE
-if (!filePath) {
+const apiUrl = (process.argv[2] ?? process.env.JOB_TRACKER_API_URL)?.replace(/\/$/, '')
+const apiToken = process.argv[3] ?? process.env.JOB_TRACKER_API_TOKEN
+if (!apiUrl || !apiToken) {
   console.error(
-    'Usage: tsx index.ts <path-to-sync-file.json>\n' +
-      '(or set the JOB_TRACKER_SYNC_FILE environment variable)\n\n' +
-      'The path should match the file connected in the app\'s Settings → MCP sync section.',
+    'Usage: tsx index.ts <api-url> <api-token>\n' +
+      '(or set the JOB_TRACKER_API_URL and JOB_TRACKER_API_TOKEN environment variables)\n\n' +
+      'api-url is the deployed Worker origin, e.g. https://job-tracker-sync.<subdomain>.workers.dev\n' +
+      '(the same URL + token connected in the app\'s Settings → MCP sync section).',
   )
   process.exit(1)
 }
 
-function emptyState(): PersistedState {
-  return { schemaVersion: CURRENT_SCHEMA_VERSION, applications: [], settings: { ...DEFAULT_SETTINGS } }
-}
-
 async function readState(): Promise<PersistedState> {
-  if (!existsSync(filePath)) {
-    const state = emptyState()
-    await writeState(state)
-    return state
+  const res = await fetch(`${apiUrl}/state`, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to read state from ${apiUrl}/state: ${res.status} ${await res.text()}`)
   }
-  const text = await readFile(filePath, 'utf-8')
-  if (!text.trim()) return emptyState()
-  const parsed = JSON.parse(text)
+  const parsed = (await res.json()) as { applications?: unknown; settings?: Partial<PersistedState['settings']> }
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     applications: sanitizeApplications(parsed.applications),
@@ -51,7 +46,20 @@ async function readState(): Promise<PersistedState> {
 }
 
 async function writeState(state: PersistedState): Promise<void> {
-  await writeFile(filePath, JSON.stringify(state, null, 2), 'utf-8')
+  const res = await fetch(`${apiUrl}/state`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(state),
+  })
+  if (res.status === 409) {
+    throw new Error(
+      'Refused to write: the server rejected an empty-applications overwrite of non-empty stored data (409). ' +
+        'This tool should never legitimately produce an empty applications array — if you see this, something upstream is wrong.',
+    )
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to write state to ${apiUrl}/state: ${res.status} ${await res.text()}`)
+  }
 }
 
 function summarize(app: JobApplication) {
@@ -262,4 +270,4 @@ server.registerTool(
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
-console.error(`job-tracker MCP server running on stdio, syncing ${filePath}`)
+console.error(`job-tracker MCP server running on stdio, syncing ${apiUrl}`)
